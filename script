@@ -1,0 +1,47 @@
+// Vul je API-sleutel en zoekmachine-ID in
+const API_KEY = 'insert API key here';
+const SEARCH_ENGINE_ID = 'Insert Search Engine ID here';
+
+function searchFirstResult() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const lastRow = sheet.getLastRow();
+  const startRow = parseInt(PropertiesService.getScriptProperties().getProperty('lastProcessedRow')) || 2;
+
+  for (let i = startRow; i <= lastRow; i++) {
+    const keyword = sheet.getRange(i, 1).getValue();
+    if (!keyword) continue;
+
+    try {
+      const url = `https://www.googleapis.com/customsearch/v1?key=${API_KEY}&cx=${SEARCH_ENGINE_ID}&q=${encodeURIComponent(keyword)}&gl=nl&hl=nl`;
+      const response = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
+      const responseCode = response.getResponseCode();
+
+      if (responseCode === 429) {
+        // Sla de huidige voortgang op en beëindig de loop bij quota-fout
+        PropertiesService.getScriptProperties().setProperty('lastProcessedRow', i);
+        Logger.log("Quota exceeded, script will resume from row " + i + " on next run.");
+        break;
+      }
+
+      const data = JSON.parse(response.getContentText());
+
+      if (data.items && data.items.length > 0) {
+        // Pak de URL van het eerste organische resultaat
+        const firstResultUrl = data.items[0].link;
+        sheet.getRange(i, 6).setValue(firstResultUrl);  // Kolom F is kolomindex 6
+      } else {
+        sheet.getRange(i, 6).setValue('Geen resultaten gevonden');
+      }
+
+      // Voortgang opslaan
+      PropertiesService.getScriptProperties().setProperty('lastProcessedRow', i + 1);
+      
+      // Voorkom te veel aanvragen achter elkaar (rate limiting)
+      Utilities.sleep(1000);
+
+    } catch (error) {
+      sheet.getRange(i, 6).setValue('Error: ' + error.message);
+      Logger.log('Error on row ' + i + ': ' + error.message);
+    }
+  }
+}
